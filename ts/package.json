@@ -1,0 +1,59 @@
+{
+  "name": "@quantakrypto/hybrid-kem-combiner",
+  "version": "0.1.0",
+  "description": "Generic, standalone hybrid KEM combiner: the IND-CCA preserving construction of NIST SP 800-227 section 4.6.2 and draft-irtf-cfrg-hybrid-kems section 5.1.3, over any pair of KEMs",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "sideEffects": false,
+  "license": "MIT OR Apache-2.0",
+  "author": "QuantaKrypto",
+  "homepage": "https://github.com/quantakrypto/hybrid-kem-combiner",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quantakrypto/hybrid-kem-combiner.git",
+    "directory": "ts"
+  },
+  "bugs": {
+    "url": "https://github.com/quantakrypto/hybrid-kem-combiner/issues"
+  },
+  "keywords": [
+    "cryptography",
+    "post-quantum",
+    "kem",
+    "hybrid",
+    "combiner",
+    "ml-kem",
+    "x-wing"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^5.9.3"
+  }
+}

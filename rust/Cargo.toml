@@ -9,6 +9,10 @@ repository = "https://github.com/quantakrypto/hybrid-kem-combiner"
 homepage = "https://github.com/quantakrypto/hybrid-kem-combiner"
 documentation = "https://docs.rs/hybrid-kem-combiner"
 readme = "README.md"
+# The conformance vectors live at the repository root and are shared with the
+# TypeScript package, so the test that reads them cannot run from a published
+# .crate. Run the suite from a checkout instead.
+exclude = ["/tests"]
 keywords = ["cryptography", "post-quantum", "kem", "hybrid", "combiner"]
 categories = ["cryptography", "no-std"]
 

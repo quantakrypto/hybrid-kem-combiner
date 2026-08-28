@@ -1,0 +1,5 @@
+# Everything the package needs is in `files` in package.json. This file only
+# guards against the defaults: never publish sources, tests or tsconfig.
+src/
+test/
+tsconfig.json
