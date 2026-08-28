@@ -104,6 +104,10 @@ extern crate alloc;
 
 mod kdf;
 
+#[cfg(feature = "suites")]
+#[cfg_attr(docsrs, doc(cfg(feature = "suites")))]
+pub mod suites;
+
 pub use kdf::Kdf;
 
 /// Which input a validation error refers to.
@@ -190,7 +194,11 @@ impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Error::Empty(which) => write!(f, "combiner input {which} is empty"),
-            Error::UnsupportedOutputLength { requested, min, max } => write!(
+            Error::UnsupportedOutputLength {
+                requested,
+                min,
+                max,
+            } => write!(
                 f,
                 "requested output length {requested} is outside the range \
                  {min}..={max} supported by this KDF"
@@ -447,11 +455,7 @@ pub fn combine_universal(
 /// # Errors
 ///
 /// The same as [`combine_universal`].
-pub fn combine_c2pri(
-    kdf: Kdf,
-    inputs: &C2priInputs<'_>,
-    out: &mut [u8],
-) -> Result<(), Error> {
+pub fn combine_c2pri(kdf: Kdf, inputs: &C2priInputs<'_>, out: &mut [u8]) -> Result<(), Error> {
     let parts = [
         inputs.pq_shared_secret.as_bytes(),
         inputs.traditional_shared_secret.as_bytes(),

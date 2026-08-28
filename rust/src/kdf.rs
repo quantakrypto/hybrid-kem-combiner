@@ -91,12 +91,7 @@ impl Kdf {
     /// `parts` are absorbed in order, directly into the hash or HMAC state.
     /// Nothing is concatenated into an intermediate buffer, so there is no
     /// heap copy of the shared secrets to leak.
-    pub(crate) fn derive(
-        self,
-        parts: &[&[u8]],
-        label: &[u8],
-        out: &mut [u8],
-    ) -> Result<(), Error> {
+    pub(crate) fn derive(self, parts: &[&[u8]], label: &[u8], out: &mut [u8]) -> Result<(), Error> {
         let (min, max) = (self.min_output_len(), self.max_output_len());
         if out.len() < min || out.len() > max {
             return Err(Error::UnsupportedOutputLength {
@@ -124,8 +119,7 @@ impl Kdf {
                 hkdf_sha512(parts, None, label, out)
             }
             Kdf::HkdfSha512LabelInIkm => {
-                let ikm_len: usize =
-                    parts.iter().map(|p| p.len()).sum::<usize>() + label.len();
+                let ikm_len: usize = parts.iter().map(|p| p.len()).sum::<usize>() + label.len();
                 check_hkdf_domains(ikm_len, 0)?;
                 hkdf_sha512(parts, Some(label), &[], out)
             }

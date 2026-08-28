@@ -18,9 +18,11 @@ const VECTORS: &str = concat!(
 
 fn load() -> Value {
     let raw = std::fs::read_to_string(VECTORS).unwrap_or_else(|e| {
-        panic!("cannot read {VECTORS}: {e}. The conformance vectors live at \
+        panic!(
+            "cannot read {VECTORS}: {e}. The conformance vectors live at \
                 the repository root and are shared with the TypeScript \
-                package.")
+                package."
+        )
     });
     serde_json::from_str(&raw).expect("vectors are valid JSON")
 }
@@ -142,8 +144,7 @@ fn every_negative_case_is_refused() {
         let name = case["name"].as_str().unwrap();
         let len = case["output_length"].as_u64().unwrap() as usize;
         let mut out = vec![0u8; len];
-        let err = run_case(case, &mut out)
-            .expect_err(&format!("{name} was accepted"));
+        let err = run_case(case, &mut out).expect_err(&format!("{name} was accepted"));
         let kind = match err {
             Error::Empty(_) => "empty-input",
             Error::UnsupportedOutputLength { .. } => "unsupported-output-length",
@@ -254,8 +255,7 @@ fn the_two_forms_disagree() {
             traditional_ciphertext: Ciphertext::new(&ct_t),
             traditional_encapsulation_key: EncapsulationKey::new(&ek_t),
             label: Label::new(&label),
-            assertion:
-                C2priAssertion::assert_pq_kem_is_ciphertext_second_preimage_resistant(),
+            assertion: C2priAssertion::assert_pq_kem_is_ciphertext_second_preimage_resistant(),
         },
         &mut c,
     )
@@ -299,8 +299,7 @@ fn the_vec_helpers_agree_with_the_slice_api() {
         traditional_ciphertext: Ciphertext::new(&ct_t),
         traditional_encapsulation_key: EncapsulationKey::new(&ek_t),
         label: Label::new(&label),
-        assertion:
-            C2priAssertion::assert_pq_kem_is_ciphertext_second_preimage_resistant(),
+        assertion: C2priAssertion::assert_pq_kem_is_ciphertext_second_preimage_resistant(),
     };
     let mut out = [0u8; 32];
     combine_c2pri(Kdf::Sha3_256, &c2pri, &mut out).unwrap();

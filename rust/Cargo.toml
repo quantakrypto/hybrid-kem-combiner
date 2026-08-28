@@ -1,16 +1,16 @@
 [package]
 name = "hybrid-kem-combiner"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-description = "Generic, standalone hybrid KEM combiner: the IND-CCA preserving construction of NIST SP 800-227 section 4.6.2 and draft-irtf-cfrg-hybrid-kems section 5.1.3, over any pair of KEMs"
+description = "Generic, standalone hybrid KEM combiner (NIST SP 800-227 section 4.6.2, draft-irtf-cfrg-hybrid-kems section 5.1.3) plus the complete hybrid KEM suites of draft-irtf-cfrg-concrete-hybrid-kems"
 repository = "https://github.com/quantakrypto/hybrid-kem-combiner"
 homepage = "https://github.com/quantakrypto/hybrid-kem-combiner"
 documentation = "https://docs.rs/hybrid-kem-combiner"
 readme = "README.md"
 # The conformance vectors live at the repository root and are shared with the
-# TypeScript package, so the test that reads them cannot run from a published
+# TypeScript package, so the tests that read them cannot run from a published
 # .crate. Run the suite from a checkout instead.
 exclude = ["/tests"]
 keywords = ["cryptography", "post-quantum", "kem", "hybrid", "combiner"]
@@ -21,12 +21,46 @@ default = ["alloc"]
 # Adds the `*_to_vec` helpers. The core combiner allocates nothing and does
 # not need this.
 alloc = ["zeroize/alloc"]
+# Adds the `suites` module: complete hybrid KEMs (key generation,
+# encapsulation, decapsulation) layered on the combiner. This pulls in ML-KEM
+# and elliptic curve implementations, which the combiner itself does not need,
+# so it is off by default.
+suites = [
+    "alloc",
+    "dep:libcrux-ml-kem",
+    "dep:libcrux-sha3",
+    "dep:p256",
+    "dep:p384",
+    "dep:x25519-dalek",
+]
+# Adds `Suite::generate_key_pair` and `Suite::encapsulate`, which draw from
+# the operating system's random number generator. Without it only the
+# seed-driven and derandomised forms are available, which is what a caller
+# supplying its own randomness wants.
+os-rng = ["suites", "dep:getrandom"]
 
 [dependencies]
 hkdf = { version = "0.13", default-features = false }
 sha2 = { version = "0.11", default-features = false }
 sha3 = { version = "0.12", default-features = false }
 zeroize = { version = "1.9", default-features = false }
+
+# `suites` only, all optional.
+getrandom = { version = "0.4", optional = true }
+libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
+    "mlkem768",
+    "mlkem1024",
+], optional = true }
+libcrux-sha3 = { version = "0.0.10", default-features = false, optional = true }
+p256 = { version = "0.14", default-features = false, features = [
+    "arithmetic",
+], optional = true }
+p384 = { version = "0.14", default-features = false, features = [
+    "arithmetic",
+], optional = true }
+x25519-dalek = { version = "3.0", default-features = false, features = [
+    "static_secrets",
+], optional = true }
 
 [dev-dependencies]
 hex = "0.4"
