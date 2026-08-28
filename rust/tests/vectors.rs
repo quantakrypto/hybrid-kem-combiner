@@ -157,8 +157,9 @@ fn every_negative_case_is_refused() {
 
 // --- Properties the vectors alone cannot pin ------------------------------
 
-fn sample() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
-    (
+/// ss_pq, ss_t, ct_pq, ct_t, ek_pq, ek_t, label, in the combiner's own order.
+fn sample() -> [Vec<u8>; 7] {
+    [
         vec![0x11; 32],
         vec![0x22; 32],
         vec![0x33; 1088],
@@ -166,7 +167,7 @@ fn sample() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
         vec![0x55; 1184],
         vec![0x66; 32],
         b"example.org/v1/ml-kem-768+x25519".to_vec(),
-    )
+    ]
 }
 
 fn universal_of(kdf: Kdf, parts: &[Vec<u8>; 7]) -> [u8; 32] {
@@ -198,8 +199,7 @@ fn every_input_is_bound() {
         Kdf::HkdfSha512LabelAsInfo,
         Kdf::HkdfSha512LabelInIkm,
     ] {
-        let (a, b, c, d, e, f, g) = sample();
-        let base = [a, b, c, d, e, f, g];
+        let base = sample();
         let baseline = universal_of(kdf, &base);
         for i in 0..7 {
             let mut mutated = base.clone();
@@ -216,8 +216,7 @@ fn every_input_is_bound() {
 /// Two inputs of the same length must not be interchangeable.
 #[test]
 fn the_combiner_is_not_symmetric_in_its_shared_secrets() {
-    let (a, b, c, d, e, f, g) = sample();
-    let base = [a, b, c, d, e, f, g];
+    let base = sample();
     let mut swapped = base.clone();
     swapped.swap(0, 1);
     assert_ne!(
@@ -229,7 +228,7 @@ fn the_combiner_is_not_symmetric_in_its_shared_secrets() {
 /// The two forms must not agree, or the C2PRI gate would be decorative.
 #[test]
 fn the_two_forms_disagree() {
-    let (ss_pq, ss_t, ct_pq, ct_t, ek_pq, ek_t, label) = sample();
+    let [ss_pq, ss_t, ct_pq, ct_t, ek_pq, ek_t, label] = sample();
     let mut u = [0u8; 32];
     combine_universal(
         Kdf::Sha3_256,
@@ -268,8 +267,7 @@ fn the_two_forms_disagree() {
 /// The three KDFs must not agree with each other on the same inputs.
 #[test]
 fn the_three_kdfs_disagree() {
-    let (a, b, c, d, e, f, g) = sample();
-    let base = [a, b, c, d, e, f, g];
+    let base = sample();
     let one = universal_of(Kdf::Sha3_256, &base);
     let two = universal_of(Kdf::HkdfSha512LabelAsInfo, &base);
     let three = universal_of(Kdf::HkdfSha512LabelInIkm, &base);
@@ -280,7 +278,7 @@ fn the_three_kdfs_disagree() {
 
 #[test]
 fn the_vec_helpers_agree_with_the_slice_api() {
-    let (ss_pq, ss_t, ct_pq, ct_t, ek_pq, ek_t, label) = sample();
+    let [ss_pq, ss_t, ct_pq, ct_t, ek_pq, ek_t, label] = sample();
     let universal = UniversalInputs {
         pq_shared_secret: SharedSecret::new(&ss_pq),
         traditional_shared_secret: SharedSecret::new(&ss_t),
@@ -313,7 +311,7 @@ fn the_vec_helpers_agree_with_the_slice_api() {
 /// The error names the input that was empty, so a caller can find it.
 #[test]
 fn an_empty_input_is_named_in_the_error() {
-    let (ss_pq, ss_t, ct_pq, ct_t, ek_pq, _ek_t, label) = sample();
+    let [ss_pq, ss_t, ct_pq, ct_t, ek_pq, _ek_t, label] = sample();
     let err = combine_universal(
         Kdf::Sha3_256,
         &UniversalInputs {
