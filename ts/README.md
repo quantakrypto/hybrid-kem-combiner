@@ -28,7 +28,9 @@ This implements a specified construction. **The implementation itself has had
 no external cryptographic review.** Conformance is checked against external
 anchors: three of the shared conformance vectors are the shared secrets
 published in Appendix C of draft-connolly-cfrg-xwing-kem-10, which the C2PRI
-form with SHA3-256 reproduces exactly.
+form with SHA3-256 reproduces exactly, and the three CFRG suites are checked
+against all thirty test vectors published in Appendix B of
+draft-irtf-cfrg-concrete-hybrid-kems-04.
 
 ## Install
 
@@ -36,8 +38,13 @@ form with SHA3-256 reproduces exactly.
 npm install @quantakrypto/hybrid-kem-combiner
 ```
 
-ESM only. One runtime dependency, `@noble/hashes`, for HKDF and SHA-3.
-Primitives are not hand rolled here.
+ESM only. Three runtime dependencies: `@noble/hashes` for HKDF, SHA-3 and
+SHAKE, and `@noble/curves` and `@noble/post-quantum` for the suites. No
+primitive is hand rolled here.
+
+If you only want the combiner you still install all three, because npm cannot
+make a subpath's dependencies conditional the way a Cargo feature can. A
+bundler will drop the two suite dependencies if `./suites` is never imported.
 
 ## Usage
 
@@ -64,6 +71,38 @@ function's documentation first.
 Three KDFs, chosen explicitly at every call site: `sha3-256` (what X-Wing and
 the published instantiations use, and the one to pick for interoperability),
 `hkdf-sha512-label-as-info` and `hkdf-sha512-label-in-ikm`.
+
+## Complete hybrid KEM suites
+
+`@quantakrypto/hybrid-kem-combiner/suites` ships four complete hybrid KEMs:
+key generation, encapsulation and decapsulation as one primitive, layered on
+the combiner. **They are not all the same kind of thing.**
+
+| Suite | Specified by | External test vectors |
+| --- | --- | --- |
+| `MLKEM768_P256` | CFRG, draft-irtf-cfrg-concrete-hybrid-kems-04 section 4.1 | **Yes**, the draft's Appendix B |
+| `MLKEM768_X25519` | CFRG, section 4.2, identical to X-Wing | **Yes**, the draft's Appendix B |
+| `MLKEM1024_P384` | CFRG, section 4.3 | **Yes**, the draft's Appendix B |
+| `MLKEM1024_X25519` | **This project, and nobody else** | **No, and none can exist** |
+
+All thirty of the draft's published vectors pass, and the three CFRG suites are
+additionally checked against `@noble/post-quantum`'s independent
+implementations of the same three specifications, in both directions of
+decapsulation. `MLKEM1024_X25519` is specified in `docs/mlkem1024-x25519.md` in
+the repository, which argues the case against it as well as the case for it,
+and its vectors are regression pins rather than an external anchor.
+`suite.provenance` carries the distinction at runtime.
+
+```ts
+import { MLKEM768_X25519 } from '@quantakrypto/hybrid-kem-combiner/suites';
+
+const recipient = MLKEM768_X25519.generateKeyPair();
+const sent = MLKEM768_X25519.encapsulate(recipient.encapsulationKey);
+const received = MLKEM768_X25519.decapsulate(
+  recipient.decapsulationKey,
+  sent.ciphertext,
+);
+```
 
 ## Interoperability
 

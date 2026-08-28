@@ -1,11 +1,20 @@
 # hybrid-kem-combiner
 
-A generic, standalone hybrid KEM combiner, in Rust and TypeScript, tested
-against one shared set of conformance vectors.
+A generic, standalone hybrid KEM combiner, plus complete hybrid KEM suites
+built on it, in Rust and TypeScript, tested against one shared set of
+conformance vectors.
 
-- Rust crate: [`hybrid-kem-combiner`](rust/) (`no_std`, no allocator required)
-- npm package: [`@quantakrypto/hybrid-kem-combiner`](ts/) (ESM, one dependency)
+- Rust crate: [`hybrid-kem-combiner`](rust/) (`no_std`, no allocator required
+  for the combiner; the suites are behind an off-by-default feature)
+- npm package: [`@quantakrypto/hybrid-kem-combiner`](ts/) (ESM, suites on a
+  separate export subpath)
 - Vectors: [`vectors/`](vectors/), consumed by both
+
+**If you are here for a suite and want the one-line answer:** three of the
+four are specified by the CFRG and are checked against that draft's own
+published test vectors. The fourth, `MLKEM1024-X25519`, is specified by this
+project and by nobody else, has no external test vectors and cannot have any.
+[The table below](#complete-hybrid-kem-suites) says which is which.
 
 ## What a KEM combiner is, and why it carries the whole guarantee
 
@@ -73,14 +82,155 @@ either component is secure, with no further assumptions on the components".
 Both citations were checked against the primary documents, not against
 secondary sources. See [`docs/references.md`](docs/references.md).
 
+## Complete hybrid KEM suites
+
+A combiner on its own is awkward to use. The caller has to wire up its own
+ML-KEM, its own curve, and feed six byte strings in the right positions. A
+suite is key generation, encapsulation and decapsulation as one atomic
+primitive, which is what people actually want, and it removes the last way the
+combiner's API can be misused.
+
+Four suites ship. **They are not all the same kind of thing.**
+
+| Suite | Components | Specified by | External test vectors |
+| --- | --- | --- | --- |
+| `MLKEM768-P256` | ML-KEM-768 + P-256 | **CFRG**, draft-irtf-cfrg-concrete-hybrid-kems-04 section 4.1 | **Yes.** The draft's Appendix B |
+| `MLKEM768-X25519` | ML-KEM-768 + X25519 | **CFRG**, section 4.2. Identical to X-Wing | **Yes.** The draft's Appendix B |
+| `MLKEM1024-P384` | ML-KEM-1024 + P-384 | **CFRG**, section 4.3 | **Yes.** The draft's Appendix B |
+| `MLKEM1024-X25519` | ML-KEM-1024 + X25519 | **This project, and nobody else.** [`docs/mlkem1024-x25519.md`](docs/mlkem1024-x25519.md) | **No, and none can exist.** Regression pins only |
+
+The distinction is not cosmetic. The first three are checked against thirty
+vectors produced by the specification's authors: if the PRG output length, the
+seed split, the rejection sampling, the point encoding, the shared secret
+extraction, the combiner input order or the label were wrong, those tests
+would fail. The fourth is checked against vectors this project generated from
+its own implementations, which proves that the two languages agree and that
+the bytes have not drifted, and proves nothing about conformance, because
+there is nothing external to conform to.
+
+Both languages carry that distinction at runtime, not only in prose:
+`Suite::provenance()` in Rust, `suite.provenance` in TypeScript.
+
+### The construction the suites use
+
+All four use the **CG framework** of draft-irtf-cfrg-hybrid-kems-12 section
+5.5: the C2PRI combiner over a nominal group, with SHAKE256 as the PRG and
+SHA3-256 as the KDF. Every suite's shared secret is this library's own
+`combine_c2pri` with `Kdf::Sha3_256`, so the suites are a layer above the
+combiner rather than a parallel implementation of it.
+
+```text
+DeriveKeyPair(seed):
+    seed_full        = SHAKE256(seed, KEM_PQ.Nseed + Group_T.Nseed)
+    (seed_PQ, seed_T) = split(KEM_PQ.Nseed, Group_T.Nseed, seed_full)
+    ek = concat(ML-KEM.DeriveKeyPair(seed_PQ).ek, Exp(g, RandomScalar(seed_T)))
+
+Encaps(ek):
+    ss_H = SHA3-256(ss_PQ || ss_T || ct_T || ek_T || Label)
+    ct   = concat(ct_PQ, ct_T)
+```
+
+### About MLKEM1024-X25519
+
+No published standard pairs ML-KEM-1024 with X25519. Every Category 5 hybrid
+in the drafts pairs with P-384, because CNSA 2.0 continues CNSA 1.0's key
+establishment over P-384 alongside ML-KEM-1024. That is a migration lineage,
+not a security level requirement.
+
+ML-KEM-1024 gives Category 5; X25519 gives roughly 128 bits classically. Those
+are not level matched, and the published suites are. The counter-argument is
+that the classical half only has to survive a break in ML-KEM attacked
+classically, where 128 bits is ample, and that once a cryptographically
+relevant quantum computer exists Shor breaks X25519 and P-384 alike, so the
+extra 64 bits buys protection only in the narrow case where ML-KEM is broken
+**and** the adversary commands more than 2^128 but fewer than 2^192 classical
+operations.
+
+The case for it is one sentence: Category 5 post-quantum without a NIST curve.
+
+[`docs/mlkem1024-x25519.md`](docs/mlkem1024-x25519.md) is the full
+specification, and its rationale section is written so that you can finish it
+and decide against using this. If you have no specific reason to avoid NIST
+curves, use `MLKEM1024-P384`: it is specified by a research group, and it has
+published vectors.
+
+### Using a suite
+
+```rust
+// Cargo.toml: hybrid-kem-combiner = { version = "0.2", features = ["os-rng"] }
+use hybrid_kem_combiner::suites::Suite;
+
+let suite = Suite::MlKem768X25519;
+let recipient = suite.generate_key_pair()?;
+
+// Sender, holding only the encapsulation key.
+let sent = suite.encapsulate(recipient.encapsulation_key())?;
+
+// Recipient.
+let received = suite.decapsulate(recipient.decapsulation_key(), sent.ciphertext())?;
+assert_eq!(sent.shared_secret(), received.as_slice());
+```
+
+```ts
+import { MLKEM768_X25519 } from '@quantakrypto/hybrid-kem-combiner/suites';
+
+const recipient = MLKEM768_X25519.generateKeyPair();
+const sent = MLKEM768_X25519.encapsulate(recipient.encapsulationKey);
+const received = MLKEM768_X25519.decapsulate(
+  recipient.decapsulationKey,
+  sent.ciphertext,
+);
+```
+
+`encapsulate_derand` / `encapsulateDerand` take the randomness explicitly, for
+test vectors and for callers with their own source of randomness.
+
+### What the suites cost you
+
+In Rust the suites are behind the off-by-default `suites` feature, which pulls
+in `libcrux-ml-kem`, `p256`, `p384`, `x25519-dalek` and `libcrux-sha3`. The
+combiner alone still builds `no_std` with no allocator and four small
+dependencies. `os-rng` additionally pulls in `getrandom` and gives you
+`generate_key_pair` and `encapsulate`.
+
+In TypeScript there is no equivalent gate. npm cannot make a subpath's
+dependencies conditional, so the package now has three runtime dependencies
+(`@noble/hashes`, `@noble/curves`, `@noble/post-quantum`) instead of one, and
+a consumer who only wants the combiner installs all three. A bundler will drop
+the two suite dependencies if `./suites` is never imported, but the install is
+paid regardless. That is a real regression for combiner-only users and it is
+stated here rather than left to be discovered.
+
 ## The gap this fills
 
-The construction is specified. What did not exist, in either the Rust or the
-JavaScript ecosystem, is a **generic, standalone implementation of it**: one
-that takes six byte strings and a label and gives you the combined key, over
-whatever pair of KEMs you are actually using.
+The construction is specified. What did not exist is a **standalone,
+byte-level implementation of it in Rust or TypeScript**: one that takes six
+byte strings and a label and gives you the combined key, over whatever pair of
+KEMs you are actually using.
 
-Survey as of 28 August 2026:
+That claim used to be broader here, and it was wrong. An earlier survey of
+this repository concluded that no generic combiner existed in any ecosystem.
+It does. `katzenpost/hpqc`'s `kem/combiner` package, in Go, is a genuine
+generic combiner over an arbitrary number of sub-KEMs, and it cites the same
+Giacon, Heuer and Poettering result. The corrected claim is narrower and it is
+the one this project can actually support: no standalone byte-level combiner
+in Rust or TypeScript.
+
+Two things distinguish `hpqc` from this library, and neither is a criticism of
+it:
+
+- It exposes **whole KEM types** (`kem.Scheme`, `PublicKey`, `PrivateKey`),
+  not a function over bytes. You combine schemes, not values you already hold.
+- It is a **different construction**. Its split PRF is
+  `hash_i = BLAKE2b(label || len(ss_i) || ss_i || n || len(ct_j) || ct_j ...)`
+  for each component, XORed together, with length-prefixed inputs. That is the
+  XOR-of-PRF-outputs shape of the original paper, not `UniversalCombiner`'s
+  single hash over an unprefixed concatenation, and it binds ciphertexts but
+  not encapsulation keys. The two are not byte compatible and were never
+  meant to be. Its licence is AGPL-3.0-only, which is its own consideration
+  for anyone thinking of reusing it.
+
+Survey of Rust and JavaScript as of 28 August 2026:
 
 | Where | What exists | Why it is not this |
 | --- | --- | --- |
@@ -94,11 +244,17 @@ Survey as of 28 August 2026:
 | npm | `xwing-wasm`, `ts-mls`, `mlkem` | Fixed suites or whole protocols. |
 | npm | searches for "kem combiner" | Nothing. The hits are stream combiners and Salesforce manifest tools. |
 
-So the gap claim holds, with one correction and one caveat worth stating
-plainly rather than hiding: the crate name `pq-kem-combiner` is already taken on
-crates.io by an empty placeholder, and `@noble/post-quantum` is closer to
-generic than "ships X-Wing" suggests. Neither gives you a combiner you can call
-on byte strings.
+So the narrowed gap claim holds, with two caveats worth stating plainly rather
+than hiding: the crate name `pq-kem-combiner` is already taken on crates.io by
+an empty placeholder, and `@noble/post-quantum` is closer to generic than
+"ships X-Wing" suggests. Neither gives you a combiner you can call on byte
+strings.
+
+The suites are a different matter, and the gap there is smaller still.
+`@noble/post-quantum` ships all three CFRG suites, and this project's
+TypeScript tests use them as a differential oracle. What this project adds on
+that front is a Rust implementation, byte-identical cross-language vectors,
+provenance carried in the API, and `MLKEM1024-X25519`.
 
 ## What is and is not reviewed
 
@@ -126,6 +282,27 @@ What that leaves you with, stated honestly:
   correctly in the split-key PRF role the security argument needs. The last of
   those is an open question about the construction, not about this code, and
   it is why [`Kdf::Sha3_256`](rust/src/kdf.rs) is the default recommendation.
+
+### The suites, specifically
+
+- **Three of the four suites are specified elsewhere and anchored elsewhere.**
+  The CFRG draft defines them and publishes the vectors; this project
+  implements them. Thirty published vectors pass in both languages, and the
+  TypeScript tests additionally agree with `@noble/post-quantum`'s independent
+  implementation of the same three, in both directions of decapsulation.
+- **The fourth is specified by this project and anchored by nothing.**
+  `MLKEM1024-X25519` has had no external review, no formal analysis of the
+  pairing, and no published vectors, and it never will unless somebody else
+  specifies it. Its absence from the drafts is a deliberate choice by their
+  authors. Read [`docs/mlkem1024-x25519.md`](docs/mlkem1024-x25519.md),
+  including the case against.
+- **The component arithmetic is not this project's.** ML-KEM comes from
+  `libcrux-ml-kem` in Rust and `@noble/post-quantum` in TypeScript; the curves
+  come from `p256`, `p384`, `x25519-dalek` and `@noble/curves`. Those have
+  their own review status, which is theirs and not this project's to claim.
+  What this project wrote is the framework around them: the PRG expansion, the
+  seed split, the scalar sampling, the encodings and the combiner call. That
+  is what has had no review.
 
 If you are deploying this where it matters, commission a review. If you do,
 please open an issue with the outcome.
@@ -324,6 +501,17 @@ fields. You cannot pass a ciphertext where an encapsulation key belongs, and
 there is no positional order to get wrong. `SharedSecret`'s `Debug` redacts
 itself, so a secret does not reach a log by accident.
 
+The suites complicate reason 2, and it is worth saying so rather than leaving
+the older argument standing unamended. The suites module **does** own key
+generation, encapsulation, parameter sets and (behind `os-rng`) an RNG. What
+changed is that it owns them for four named, fully specified pairs rather than
+for an open-ended trait. A concrete suite has one right answer for every one of
+those questions, so there is nothing for a caller to configure and nothing for
+the library to guess. A `Kem` trait would have had to be generic over all of
+them, which is the scope that was rejected and still is. The combiner and the
+suites remain separable: the combiner is the default build, and the suites are
+a feature you turn on.
+
 ## Zeroization
 
 The combiner never copies its inputs into a heap buffer. Every input is
@@ -344,8 +532,18 @@ as best effort, because in that runtime it cannot be more than that.
 
 ## Conformance vectors
 
-[`vectors/hybrid-kem-combiner-v1.json`](vectors/hybrid-kem-combiner-v1.json) is
-language agnostic and is run by **both** implementations. It publishes the
+Three files, and the difference between them is the most important thing in
+this section.
+
+| File | What it is | Anchored outside this project |
+| --- | --- | --- |
+| [`hybrid-kem-combiner-v1.json`](vectors/hybrid-kem-combiner-v1.json) | The combiner: 15 positive and 4 negative cases | Partly. Three cases are X-Wing draft 10's Appendix C shared secrets; one is `qk-password-manager`'s independently pinned value |
+| [`concrete-hybrid-kems-04-appendix-b.json`](vectors/concrete-hybrid-kems-04-appendix-b.json) | The three CFRG suites: 30 cases, transcribed from the draft | **Yes, entirely.** Nothing in the file was computed here |
+| [`mlkem1024-x25519-v1.json`](vectors/mlkem1024-x25519-v1.json) | `MLKEM1024-X25519`: 10 cases | **No.** Regression pins generated by this project. Its `anchor` field is the string `none`, and both test suites assert on that so the file cannot quietly start claiming otherwise |
+
+All three are language agnostic and run by **both** implementations.
+
+[`vectors/hybrid-kem-combiner-v1.json`](vectors/hybrid-kem-combiner-v1.json) It publishes the
 intermediate values, not just the final key, so a mismatch is diagnosable:
 `kdf_input_hex` is the exact byte string absorbed, and the HKDF cases also
 publish the pseudorandom key. If your output is wrong and your `kdf_input_hex`
@@ -362,8 +560,8 @@ that must be refused. See [`vectors/README.md`](vectors/README.md).
 ```text
 rust/      the Rust crate
 ts/        the npm package
-vectors/   the shared conformance vectors and their generator
-docs/      references and the build report
+vectors/   the shared conformance vectors and their generators
+docs/      references, the MLKEM1024-X25519 specification, the build report
 ```
 
 The crate and the package live in subdirectories rather than at the root

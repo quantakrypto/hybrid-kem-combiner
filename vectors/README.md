@@ -1,23 +1,52 @@
 # Conformance vectors
 
-`hybrid-kem-combiner-v1.json` is the interop contract between the Rust crate
-and the TypeScript package. Both run every case in it. An implementation in
-any other language that reproduces every value here implements the same
-combiner.
+The interop contract between the Rust crate and the TypeScript package. Both
+run every case in every file here. An implementation in any other language
+that reproduces every value implements the same combiner and the same suites.
 
 Nothing in this directory requires Rust or JavaScript to consume. Every value
 is hex.
+
+## The three files, and what each one is worth
+
+This is the most important distinction in the directory. A vector that came
+from a specification's authors proves conformance to something outside this
+project. A vector this project generated proves only that the bytes have not
+changed since the last time it generated them. Both are useful; they are not
+the same thing.
+
+| File | Covers | Anchored outside this project |
+| --- | --- | --- |
+| `hybrid-kem-combiner-v1.json` | The combiner. 15 positive, 4 negative cases | **Partly.** Three cases carry X-Wing draft 10 Appendix C shared secrets, one carries `qk-password-manager`'s independently pinned value; the rest are regression pins |
+| `concrete-hybrid-kems-04-appendix-b.json` | The three CFRG suites. 30 cases | **Entirely.** Every byte is transcribed from draft-irtf-cfrg-concrete-hybrid-kems-04 Appendix B. Nothing in the file was computed here |
+| `mlkem1024-x25519-v1.json` | `MLKEM1024-X25519`. 10 cases | **Not at all, and it cannot be.** This project specifies the suite, so no published vector exists. Regression pins only |
+
+`mlkem1024-x25519-v1.json` carries an `anchor` field whose value is the string
+`none`, and both test suites assert on it, so the file cannot quietly start
+claiming to be an anchor.
 
 ## Files
 
 | File | What it is |
 | --- | --- |
-| `hybrid-kem-combiner-v1.json` | The vectors. Generated. |
-| `generate.py` | The generator, and deliberately a third implementation. |
+| `hybrid-kem-combiner-v1.json` | The combiner vectors. Generated. |
+| `generate.py` | Their generator, and deliberately a third implementation. |
 | `qk-password-manager-ek-pq.hex` | The 1568 byte ML-KEM-1024 encapsulation key of the interoperability case, kept out of the generator so the generator stays readable. |
+| `concrete-hybrid-kems-04-appendix-b.json` | The CFRG suite vectors. Transcribed, not generated. |
+| `extract_appendix_b.py` | The transcriber. It computes nothing. |
+| `mlkem1024-x25519-v1.json` | The `MLKEM1024-X25519` regression pins. |
 
-Regenerate with `python3 vectors/generate.py`. It depends on nothing outside
-the Python standard library.
+Regenerate the combiner vectors with `python3 vectors/generate.py`. It depends
+on nothing outside the Python standard library.
+
+Re-transcribe the CFRG vectors with `python3 vectors/extract_appendix_b.py`,
+which fetches the draft from ietf.org, or pass it a local copy of the `.txt`
+to run offline. It parses and length-checks; it never computes a value.
+
+Regenerate the `MLKEM1024-X25519` pins with
+`cd rust && cargo run --features suites --example generate_mlkem1024_x25519_vectors`.
+The TypeScript suite then has to reproduce them, which is what makes them a
+cross-language contract rather than one implementation talking to itself.
 
 ## Why the generator is a third implementation
 

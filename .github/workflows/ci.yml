@@ -21,8 +21,12 @@ jobs:
         run: cargo build --all-features
       - name: Build without an allocator
         run: cargo build --no-default-features
+      - name: Build the combiner without the suites
+        run: cargo build
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Format
+        run: cargo fmt --check
       - name: Test
         run: cargo test --all-features
       - name: Package
@@ -50,7 +54,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Regenerate and diff
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Regenerate the combiner vectors and diff
         run: |
           python3 vectors/generate.py
           git diff --exit-code vectors/hybrid-kem-combiner-v1.json
+      # The MLKEM1024-X25519 pins have no external anchor, so the only thing
+      # that can be checked here is that they still come out of the
+      # implementation unchanged. A hand edit to the JSON fails the build.
+      - name: Regenerate the MLKEM1024-X25519 pins and diff
+        working-directory: rust
+        run: |
+          cargo run --features suites --example generate_mlkem1024_x25519_vectors
+          git diff --exit-code ../vectors/mlkem1024-x25519-v1.json
+      # The CFRG Appendix B vectors are transcribed from a published draft
+      # rather than generated, so re-transcribing is the check. It needs the
+      # network, so a failure to fetch is not a build failure.
+      - name: Re-transcribe the CFRG Appendix B vectors and diff
+        continue-on-error: true
+        run: |
+          python3 vectors/extract_appendix_b.py
+          git diff --exit-code vectors/concrete-hybrid-kems-04-appendix-b.json

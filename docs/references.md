@@ -1,8 +1,8 @@
 # References
 
-Primary sources for the construction this library implements. Everything
-quoted in the README and in the source comments comes from these documents,
-read directly. Where a claim was checked and turned out to need qualifying,
+Primary sources for the construction and for the suites this library
+implements. Everything quoted in the README and in the source comments comes
+from these documents, read directly. Where a claim was checked and turned out to need qualifying,
 that is recorded here rather than quietly dropped.
 
 Last verified 28 August 2026.
@@ -79,6 +79,29 @@ Version 12, 6 July 2026, expires 7 January 2027.
   'ciphertext' component is an ephemeral group element, and the 'encapsulation
   key' is the group element that functions as the recipient's public key".
   That is how X25519 and X448 map onto the six inputs.
+- **Section 5.1.1** defines `expandDecapsKeyG`, `prepareEncapsG` and
+  `prepareDecapsG`, the subroutines every nominal group framework shares, and
+  **section 5.5** defines the **CG framework**: the C2PRI combiner with a
+  nominal group. All four suites in this library's `suites` module are CG.
+- **Section 5.2** specifies that the hybrid decapsulation key is the seed, and
+  says why: deriving the per-component private keys inside the hybrid is what
+  prevents a component key pair from being reused outside it, and what
+  upgrades the binding properties from LEAK-BIND to MAL-BIND.
+- **Section 4.2** defines the nominal group abstraction, requires that
+  `RandomScalar` never return zero, and states that a group whose `Exp` can
+  fail on a malformed element makes the hybrid an explicitly rejecting KEM.
+- **Section 7** establishes the IANA hybrid KEM label registry and requires
+  registered labels to be **suffix free**. That requirement is why this
+  project's own `MLKEM1024-X25519` uses a namespaced label rather than the
+  bare name: it cannot be registered, and a future registration of the bare
+  name for a different construction would collide silently.
+- **Section 8** lists the non-goals, including anonymity, deniability and
+  other key-robustness properties. That is the basis for not rejecting an
+  all-zero X25519 output in the suites.
+- **Appendix A** defines deterministic encapsulation: `Nrandom = PQ.Nrandom +
+  T.Nrandom`, the post-quantum component takes the **first** `PQ.Nrandom`
+  bytes and the traditional component the **last** `T.Nrandom` bytes. Getting
+  that order backwards reproduces nothing and looks like a broken KEM.
 - **Section 5** requires that "any KDF that utilizes HKDF MUST fully specify
   HKDF's salt, IKM, info, and L arguments". This library's two HKDF variants
   each do, and they are named separately because the specification does not
@@ -94,6 +117,51 @@ Version 12, 6 July 2026, expires 7 January 2027.
   The section also requires that the mapping onto HKDF's arguments be defined
   "in such a way that no input value will ever map to colliding IKM and info
   values".
+
+## The concrete suites
+
+### draft-irtf-cfrg-concrete-hybrid-kems
+
+Connolly, Barnes. CFRG research group document. Version 4, 6 July 2026,
+expires 7 January 2027.
+
+<https://datatracker.ietf.org/doc/draft-irtf-cfrg-concrete-hybrid-kems/>
+
+The specification of three of the four suites in this library's `suites`
+module, and the source of the only external test vectors that exist for them.
+
+- **Section 3.1.1** defines the P-256 and P-384 nominal groups: uncompressed
+  SEC1 point encoding, the x coordinate alone as the shared secret, and
+  `RandomScalar` as rejection sampling over successive `Nscalar`-byte blocks
+  of the seed, big endian, rejecting zero and anything at or above the group
+  order. It is **not** a reduction of the seed modulo the group order, and the
+  two produce different keys. `Nseed` is 128 for P-256 and 48 for P-384; the
+  asymmetry is deliberate, because P-256 rejects far more often.
+- **Section 3.1.2** defines the Curve25519 nominal group, where
+  `RandomScalar` and `ElementToSharedSecret` are both the identity function.
+- **Section 3.2.1** maps FIPS 203 onto the KEM abstraction: `DeriveKeyPair`
+  is `KeyGen_internal(seed[0:32], seed[32:64])`, so `Nseed` is 64, and
+  `EncapsDerand` is `Encaps_internal` with `Nrandom` 32.
+- **Section 4** defines `MLKEM768-P256`, `MLKEM768-X25519` and
+  `MLKEM1024-P384`, all three using the CG framework with SHAKE256 as the PRG
+  and SHA3-256 as the KDF, with their labels and lengths.
+- **Section 5** states the security requirements the components must meet and
+  where each is established, including that ML-KEM's C2PRI property is what
+  licenses the C2PRI combiner. It applies that to ML-KEM-1024, not only to
+  ML-KEM-768.
+- **Section 6** requests the IANA registrations, and names the framework of
+  all three as `CG`.
+- **Appendix B** publishes ten test vectors per suite. This repository
+  transcribes them into
+  `vectors/concrete-hybrid-kems-04-appendix-b.json` with
+  `vectors/extract_appendix_b.py`, which computes nothing.
+
+  One inconsistency in the draft, recorded because an implementer will hit it:
+  the appendix prose says the `decapsulation_key_pq` values are "ML-KEM
+  expanded private keys in the format defined by [FIPS203]", which would be
+  2400 and 3168 bytes. Every published value is 64 bytes, which is the seed
+  form that section 3.2.1 gives as the KEM's `Ndk`. The data is right and the
+  prose is loose; this project follows the data.
 
 ## The C2PRI optimisation
 
@@ -166,12 +234,19 @@ combination, without the encapsulation keys.
   (HKDF)*. <https://www.rfc-editor.org/rfc/rfc5869> The absent salt of section
   2.2, which HKDF-Extract replaces with `HashLen` zero bytes, is what both
   HKDF variants here use.
-- **FIPS 202**, SHA-3. <https://doi.org/10.6028/NIST.FIPS.202>
-- **FIPS 203**, ML-KEM. <https://doi.org/10.6028/NIST.FIPS.203>
-- **draft-irtf-cfrg-concrete-hybrid-kems**, which applies the C2PRI combiner
-  to ML-KEM-1024 in `MLKEM1024-P384`, showing that the optimisation is not
-  restricted to ML-KEM-768.
-  <https://datatracker.ietf.org/doc/draft-irtf-cfrg-concrete-hybrid-kems/>
+- **FIPS 202**, SHA-3 and SHAKE.
+  <https://doi.org/10.6028/NIST.FIPS.202>
+- **FIPS 203**, ML-KEM. <https://doi.org/10.6028/NIST.FIPS.203> Sections 6,
+  7.1, 7.2 and 7.3 for `KeyGen_internal`, `KeyGen`, `Encaps` and `Decaps`, and
+  the section 7.2 encapsulation key check that the suites perform and refuse
+  on.
+- **RFC 7748**, *Elliptic Curves for Security*, for `X25519` and the
+  Curve25519 base point.
+  <https://www.rfc-editor.org/rfc/rfc7748>
+- **SEC 1 v2**, for the uncompressed elliptic curve point encoding the NIST
+  curve suites use. <https://secg.org/sec1-v2.pdf>
+- **NIST SP 800-186**, for the P-256 and P-384 domain parameters and group
+  orders. <https://doi.org/10.6028/NIST.SP.800-186>
 - **draft-ietf-lamps-pq-composite-kem**, whose section 9.2.3 states the
   tradeoff of omitting the ML-KEM ciphertext plainly: it "does not fully
   protect against implementation errors in the ML-KEM component", and was
@@ -182,7 +257,53 @@ combination, without the encapsulation keys.
   when the combiner can live in a protocol transcript instead.
   <https://www.rfc-editor.org/rfc/rfc10024.html>
 
+## Written by this project, and not a standard
+
+### MLKEM1024-X25519
+
+[`mlkem1024-x25519.md`](mlkem1024-x25519.md), in this repository. It is listed
+in its own section so that it is not mistaken for one of the documents above.
+It has no standards status, it has had no external review, no formal analysis
+of the pairing exists, and no external test vectors exist for it or can. Its
+rationale section argues the case against it as well as the case for it, and
+records that its absence from the CFRG drafts is a deliberate choice by their
+authors.
+
 ## Survey sources
+
+### The correction
+
+The first version of the README claimed that no generic KEM combiner existed
+in any ecosystem. That was wrong, and the corrected claim is narrower: no
+standalone byte-level combiner in Rust or TypeScript.
+
+**`katzenpost/hpqc`**, package `kem/combiner`, Go, AGPL-3.0-only.
+<https://github.com/katzenpost/hpqc>
+
+It is a genuine generic combiner over an arbitrary number of sub-KEMs, and it
+cites the same Giacon, Heuer and Poettering result this library does. Its own
+package documentation gives the construction:
+
+```text
+for each i in 1..n:
+    hash_i := H(label || u32be(len(ss_i)) || ss_i ||
+                u32be(n)  || u32be(len(cct_j)) || cct_j ...)
+return hash_1 XOR hash_2 XOR ... XOR hash_n
+```
+
+with `H` BLAKE2b. Two differences, neither of them a criticism:
+
+- It exposes **whole KEM types** (`kem.Scheme`, `PublicKey`, `PrivateKey`),
+  so you combine schemes rather than bytes you already hold.
+- It is the **XOR-of-PRF-outputs** shape of the original paper, with
+  length-prefixed inputs, and it binds ciphertexts but not encapsulation keys.
+  `UniversalCombiner` is a single hash over an unprefixed concatenation that
+  binds both. The two are not byte compatible and were never meant to be.
+
+Checked against the package source on 28 August 2026, not against a secondary
+description of it.
+
+### The registries
 
 The gap claim in the README was checked against the registries themselves, not
 against secondary write-ups, on 28 August 2026:
