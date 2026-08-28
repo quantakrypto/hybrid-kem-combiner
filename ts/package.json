@@ -1,12 +1,16 @@
 {
   "name": "@quantakrypto/hybrid-kem-combiner",
-  "version": "0.1.0",
-  "description": "Generic, standalone hybrid KEM combiner: the IND-CCA preserving construction of NIST SP 800-227 section 4.6.2 and draft-irtf-cfrg-hybrid-kems section 5.1.3, over any pair of KEMs",
+  "version": "0.2.0",
+  "description": "Generic, standalone hybrid KEM combiner (NIST SP 800-227 section 4.6.2, draft-irtf-cfrg-hybrid-kems section 5.1.3) plus the complete hybrid KEM suites of draft-irtf-cfrg-concrete-hybrid-kems",
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./suites": {
+      "types": "./dist/suites.d.ts",
+      "import": "./dist/suites.js"
     }
   },
   "main": "./dist/index.js",
@@ -36,7 +40,10 @@
     "hybrid",
     "combiner",
     "ml-kem",
-    "x-wing"
+    "x-wing",
+    "x25519",
+    "p256",
+    "p384"
   ],
   "engines": {
     "node": ">=20.11"
@@ -50,7 +57,9 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@noble/hashes": "^2.4.0"
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@noble/post-quantum": "^0.7.1"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
