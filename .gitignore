@@ -1,0 +1,11 @@
+# Rust
+/rust/target/
+Cargo.lock
+
+# TypeScript
+/ts/node_modules/
+/ts/dist/
+/ts/*.tgz
+
+# macOS
+.DS_Store
