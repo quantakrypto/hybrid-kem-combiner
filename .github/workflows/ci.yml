@@ -74,6 +74,14 @@ jobs:
         run: |
           cargo run --features suites --example generate_mlkem1024_x25519_vectors
           git diff --exit-code ../vectors/mlkem1024-x25519-v1.json
+      # The degenerate element cases have no external anchor either, and a
+      # hand edit to the JSON would quietly weaken the one property the file
+      # exists to pin, so they are regenerated and diffed the same way.
+      - name: Regenerate the degenerate X25519 cases and diff
+        working-directory: rust
+        run: |
+          cargo run --features suites --example generate_x25519_degenerate_vectors
+          git diff --exit-code ../vectors/x25519-degenerate-v1.json
       # The CFRG Appendix B vectors are transcribed from a published draft
       # rather than generated, so re-transcribing is the check. It needs the
       # network, so a failure to fetch is not a build failure.

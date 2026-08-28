@@ -1,6 +1,6 @@
 // The TypeScript half of the hybrid KEM suite conformance suite.
 //
-// Two vector files are run here, and they are not the same kind of thing.
+// Three vector files are run here, and they are not the same kind of thing.
 //
 // vectors/concrete-hybrid-kems-04-appendix-b.json is transcribed from
 // Appendix B of draft-irtf-cfrg-concrete-hybrid-kems-04. Nothing in it was
@@ -11,7 +11,13 @@
 // cases prove that the bytes have not drifted and that Rust and TypeScript
 // agree, and nothing more.
 //
-// The same two files are run by rust/tests/suites.rs.
+// vectors/x25519-degenerate-v1.json is adversarial. Every group element in it
+// is one no honest peer would send: a Curve25519 u-coordinate of small order,
+// whose X25519 output is the all-zero string. What those cases pin is that the
+// output is absorbed rather than rejected, which is X-Wing's behaviour and so
+// a claim about a CFRG specified suite for the MLKEM768-X25519 half of them.
+//
+// The same three files are run by rust/tests/suites.rs.
 //
 // There is also a differential check against @noble/post-quantum's own
 // MLKEM768-P256, MLKEM768-X25519 and MLKEM1024-P384. That is an independent
@@ -34,7 +40,13 @@ import {
   ml_kem768_p256,
   ml_kem768_x25519,
 } from '@noble/post-quantum/hybrid.js';
+import { ml_kem1024, ml_kem768 } from '@noble/post-quantum/ml-kem.js';
+import { x25519 } from '@noble/curves/ed25519.js';
 
+import {
+  assertPqKemIsCiphertextSecondPreimageResistant,
+  combineC2pri,
+} from '../dist/index.js';
 import {
   MLKEM1024_P384,
   MLKEM1024_X25519,
@@ -55,6 +67,7 @@ const read = (name) =>
 
 const appendixB = read('concrete-hybrid-kems-04-appendix-b.json');
 const pins = read('mlkem1024-x25519-v1.json');
+const degenerate = read('x25519-degenerate-v1.json');
 
 const fromHex = (hex) => Uint8Array.from(Buffer.from(hex, 'hex'));
 const toHex = (bytes) => Buffer.from(bytes).toString('hex');
@@ -221,6 +234,162 @@ test('the three CFRG suites agree with @noble/post-quantum', () => {
         `${ours.name}: noble cannot decapsulate our ciphertext`,
       );
     }
+  }
+});
+
+// --- Adversarial group elements --------------------------------------------
+//
+// X25519 returns 32 zero bytes when the input u-coordinate has small order,
+// and neither X-Wing (draft-connolly-cfrg-xwing-kem-10 sections 5.4 and 5.5)
+// nor docs/mlkem1024-x25519.md section 3.7 rejects that. MLKEM768-X25519 is
+// X-Wing, so half of these cases are a claim about a CFRG specified suite: an
+// implementation that rejects here disagrees with every conforming X-Wing
+// peer on exactly the inputs an adversary gets to choose.
+//
+// This is the case that was missing, and its absence is what let this package
+// ship a divergence from Rust and from X-Wing: @noble/curves' scalarMult
+// refuses the low-order u-coordinates underneath our wrapper, so
+// encapsulateDerand threw where it should have returned a shared secret.
+
+/** Swap the last 32 bytes, which is `ek_T` or `ct_T`, for `u`. */
+const withElement = (bytes, u) => {
+  const out = Uint8Array.from(bytes);
+  out.set(u, out.length - 32);
+  return out;
+};
+
+test('every degenerate X25519 vector matches', () => {
+  assert.equal(degenerate.kind, 'adversarial');
+  assert.equal(
+    degenerate.anchor,
+    'none',
+    'these vectors must not claim an external anchor',
+  );
+  assert.equal(
+    degenerate.cases.length,
+    10,
+    'five u-coordinates for each of two suites',
+  );
+
+  for (const vector of degenerate.cases) {
+    const suite = getSuite(vector.suite);
+    const name = vector.name;
+    const u = fromHex(vector.u);
+    assert.equal(u.length, 32, `${name}: u is a Curve25519 element`);
+
+    const keyPair = suite.deriveKeyPair(fromHex(vector.seed));
+    assert.equal(
+      toHex(keyPair.encapsulationKey),
+      vector.encapsulation_key,
+      `${name}: the honest encapsulation key`,
+    );
+    const randomness = fromHex(vector.randomness);
+
+    // Encapsulation against an attacker-chosen ek_T.
+    const encapsulated = suite.encapsulateDerand(
+      withElement(keyPair.encapsulationKey, u),
+      randomness,
+    );
+    assert.equal(
+      toHex(encapsulated.sharedSecret),
+      vector.encapsulation_shared_secret,
+      `${name}: shared secret from encapsulation`,
+    );
+
+    // Decapsulation of an attacker-chosen ct_T.
+    const honest = suite.encapsulateDerand(keyPair.encapsulationKey, randomness);
+    const decapsulated = suite.decapsulate(
+      keyPair.decapsulationKey,
+      withElement(honest.ciphertext, u),
+    );
+    assert.equal(
+      toHex(decapsulated),
+      vector.decapsulation_shared_secret,
+      `${name}: shared secret from decapsulation`,
+    );
+  }
+});
+
+test('the degenerate vectors cover both Curve25519 suites', () => {
+  for (const name of ['MLKEM768-X25519', 'MLKEM1024-X25519']) {
+    const count = degenerate.cases.filter((c) => c.suite === name).length;
+    assert.equal(count, 5, `${name} has no degenerate vectors`);
+  }
+});
+
+// The recorded bytes above say the two languages agree. They do not by
+// themselves say *what* was fed to the combiner as ss_T, so this rebuilds the
+// expected value from the specification's formula with ss_T written out as 32
+// zero bytes. ML-KEM comes from @noble/post-quantum directly and the KDF from
+// this package's own exported combiner, so nothing in suites.ts contributes
+// to the expected side. An implementation that substituted anything else for
+// the degenerate shared secret, or that hashed a rejection sentinel, would
+// reproduce the file and still fail here.
+test('a degenerate ek_T contributes exactly 32 zero bytes as ss_T', () => {
+  const kems = { 'MLKEM768-X25519': ml_kem768, 'MLKEM1024-X25519': ml_kem1024 };
+  for (const vector of degenerate.cases) {
+    const suite = getSuite(vector.suite);
+    const kem = kems[vector.suite];
+    const u = fromHex(vector.u);
+    const keyPair = suite.deriveKeyPair(fromHex(vector.seed));
+    const randomness = fromHex(vector.randomness);
+
+    const ekPq = keyPair.encapsulationKey.subarray(
+      0,
+      suite.lengths.encapsulationKey - 32,
+    );
+    const message = randomness.subarray(0, 32);
+    const seedE = randomness.subarray(32);
+    const pq = kem.encapsulate(ekPq, message);
+    // ct_T = Exp(g, RandomScalar(seed_E)), and RandomScalar is the identity
+    // for Curve25519. The base point is not degenerate, so scalarMultBase
+    // needs no special handling and can come straight from @noble/curves.
+    const ctT = x25519.scalarMultBase(seedE);
+
+    const expected = combineC2pri(
+      'sha3-256',
+      {
+        pqSharedSecret: pq.sharedSecret,
+        traditionalSharedSecret: new Uint8Array(32),
+        traditionalCiphertext: ctT,
+        traditionalEncapsulationKey: u,
+        label: suite.label,
+        assertion: assertPqKemIsCiphertextSecondPreimageResistant(),
+      },
+      32,
+    );
+    const actual = suite.encapsulateDerand(
+      withElement(keyPair.encapsulationKey, u),
+      randomness,
+    ).sharedSecret;
+    assert.equal(
+      toHex(actual),
+      toHex(expected),
+      `${vector.name}: ss_T is not 32 zero bytes`,
+    );
+    assert.equal(
+      toHex(expected),
+      vector.encapsulation_shared_secret,
+      `${vector.name}: the recorded vector is not what the formula gives`,
+    );
+  }
+});
+
+test('decapsulation of a small-order ct_T is not an error', () => {
+  // docs/mlkem1024-x25519.md section 3.6 says Decaps errors only on a wrong
+  // length ciphertext. A small-order ct_T is the input most likely to break
+  // that claim, so it is the one checked.
+  for (const vector of degenerate.cases) {
+    const suite = getSuite(vector.suite);
+    const keyPair = suite.deriveKeyPair(fromHex(vector.seed));
+    const ciphertext = withElement(
+      new Uint8Array(suite.lengths.ciphertext),
+      fromHex(vector.u),
+    );
+    assert.doesNotThrow(
+      () => suite.decapsulate(keyPair.decapsulationKey, ciphertext),
+      `${vector.name}: a small-order ct_T must decapsulate, not throw`,
+    );
   }
 });
 

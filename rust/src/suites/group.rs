@@ -291,6 +291,67 @@ mod tests {
         );
     }
 
+    /// The complete set of Curve25519 u-coordinates whose `X25519` output is
+    /// the all-zero string: the points of order dividing 8, on the curve and
+    /// on its quadratic twist.
+    ///
+    /// The list is complete. X-only doubling sends `u` to
+    /// `(u^2 - 1)^2 / 4u(u^2 + Au + 1)`, so order dividing 2 needs
+    /// `4u(u^2 + Au + 1) = 0`, and `A^2 - 4` is a non-residue mod `p`,
+    /// leaving `u = 0`; order dividing 4 additionally needs `(u^2 - 1)^2 = 0`,
+    /// giving `1` and `p - 1`; order dividing 8 additionally needs `dbl(u)`
+    /// to be `1` or `p - 1`, and over `F_p` the first quartic has exactly the
+    /// two roots below while the second has none. Nothing of larger order can
+    /// be sent to zero by an RFC 7748 clamped scalar, which is `8m` with
+    /// `2^251 <= m < 2^252` and so smaller than either prime subgroup order.
+    const DEGENERATE_U: [&str; 5] = [
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0100000000000000000000000000000000000000000000000000000000000000",
+        "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+        "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+        "5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157",
+    ];
+
+    fn unhex(text: &str) -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// A small-order u-coordinate must give 32 zero bytes, not an error.
+    ///
+    /// This is the whole of `docs/mlkem1024-x25519.md` section 3.7 and of
+    /// `draft-connolly-cfrg-xwing-kem-10` sections 5.4 and 5.5, stated where
+    /// it can be checked directly rather than only through a suite. Rejecting
+    /// here, or substituting anything for the zeros, would make this
+    /// implementation disagree with X-Wing on exactly the inputs an adversary
+    /// chooses.
+    ///
+    /// The test lives next to the code because the mistake it guards against
+    /// is not one this crate can make on its own: a curve library may refuse
+    /// these inputs underneath the call, which is what the TypeScript half of
+    /// this project did until the behaviour was pinned in both languages.
+    #[test]
+    fn a_small_order_x25519_element_yields_the_all_zero_output() {
+        for scalar in [vec![0x11u8; 32], vec![0xffu8; 32], vec![0u8; 32]] {
+            for u in DEGENERATE_U {
+                assert_eq!(
+                    Group::X25519.exp_and_extract(&unhex(u), &scalar),
+                    Ok(vec![0u8; 32]),
+                    "u = {u}"
+                );
+            }
+            // The base point is not degenerate, so the same call must not be
+            // returning zeros unconditionally.
+            let base = Group::X25519.exp_base(&[0x11u8; 32]).unwrap();
+            assert_ne!(
+                Group::X25519.exp_and_extract(&base, &scalar).unwrap(),
+                vec![0u8; 32]
+            );
+        }
+    }
+
     /// Diffie-Hellman has to actually agree, in all three groups.
     #[test]
     fn the_exchange_agrees_in_every_group() {

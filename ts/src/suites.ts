@@ -341,6 +341,58 @@ function nistGroup(
   };
 }
 
+/** The Curve25519 field modulus, `2^255 - 19`. */
+const P25519 = (1n << 255n) - 19n;
+
+/** Clears bit 255, which is RFC 7748 section 5's mask of the last byte. */
+const MASK255 = (1n << 255n) - 1n;
+
+/**
+ * The u-coordinates whose `X25519` output is the all-zero string.
+ *
+ * These are exactly the points of order dividing 8, on the curve and on its
+ * quadratic twist, and there are exactly five of them. It is the same list
+ * libsodium and post-CVE-2017-0379 Libgcrypt carry, and the same one
+ * `@noble/curves` rejects on.
+ *
+ * The list is complete, and the argument is short enough to write down.
+ * X-only doubling sends `u` to `(u^2 - 1)^2 / 4u(u^2 + Au + 1)`, so:
+ *
+ * - order dividing 2 needs `4u(u^2 + Au + 1) = 0`. `A^2 - 4` is a
+ *   non-residue mod `p`, so the quadratic has no root and only `u = 0`
+ *   qualifies.
+ * - order dividing 4 additionally needs `(u^2 - 1)^2 = 0`, giving `u = 1`
+ *   and `u = p - 1`.
+ * - order dividing 8 additionally needs `dbl(u)` to be `1` or `p - 1`. Over
+ *   `F_p` the first quartic has exactly two roots, listed below, and the
+ *   second has none.
+ *
+ * Curve25519 has cofactor 8 and its twist cofactor 4, so nothing of larger
+ * order can be sent to zero by an RFC 7748 clamped scalar: such a scalar is
+ * `8m` with `2^251 <= m < 2^252`, which is smaller than either prime
+ * subgroup order, so it is never a multiple of one.
+ */
+const X25519_DEGENERATE_U: ReadonlySet<bigint> = new Set([
+  0n,
+  1n,
+  P25519 - 1n,
+  325606250916557431795983626356110631294008115727848805560023387167927233504n,
+  39382357235489614581723060781553021112529911719440698176882885853963445705823n,
+]);
+
+/**
+ * Whether `X25519(k, element)` is the all-zero string for every RFC 7748
+ * clamped scalar `k`.
+ *
+ * The decoding is RFC 7748 section 5's `decodeUCoordinate`: mask the most
+ * significant bit of the last byte, then read little endian and reduce, so
+ * that the non-canonical encodings of `0` and `1` are recognised too.
+ */
+function isDegenerateX25519U(element: Uint8Array): boolean {
+  const u = bytesToBigIntBE(Uint8Array.from(element).reverse()) & MASK255;
+  return X25519_DEGENERATE_U.has(u % P25519);
+}
+
 const CURVE25519: NominalGroup = {
   nseed: 32,
   nelem: 32,
@@ -352,14 +404,36 @@ const CURVE25519: NominalGroup = {
   expAndExtract(element, seed) {
     requireLength(seed, 32, 'Curve25519 scalar');
     requireLength(element, 32, 'Curve25519 element');
-    // Deliberately no all-zero check. Every 32 byte string is a valid
-    // Curve25519 u-coordinate, X-Wing's Encapsulate and Decapsulate
+    // No all-zero check *and no all-zero rejection*. Every 32 byte string is
+    // a valid Curve25519 u-coordinate, X-Wing's Encapsulate and Decapsulate
     // (draft-connolly-cfrg-xwing-kem-10 sections 5.4 and 5.5) do not check,
     // and rejecting here would make this implementation disagree with
     // conforming peers on exactly the inputs an attacker chooses.
     // Contributory behaviour is an explicit non-goal of
     // draft-irtf-cfrg-hybrid-kems-12 section 8.
-    return x25519.scalarMult(seed, element);
+    //
+    // Saying that is not enough on its own, which is the whole point of this
+    // block. `@noble/curves`' `x25519.scalarMult` refuses the low-order
+    // u-coordinates rather than returning the all-zero output RFC 7748
+    // section 6.1 permits detecting from, and it does so for a defensible
+    // reason of its own: rejecting before the ladder avoids running 255
+    // rounds against the long-term secret for an attacker's benefit. That is
+    // the right default for a bare ECDH API and the wrong one here, so the
+    // refusal is turned back into the all-zero output the suite specifies.
+    //
+    // The recovery never guesses. `isDegenerateX25519U` decides, from the
+    // input alone and independently of the dependency, whether the output is
+    // mathematically the all-zero string; anything else `scalarMult` throws
+    // is rethrown untouched. A failure for an unrelated reason therefore
+    // cannot be laundered into a silently wrong shared secret, and a future
+    // version of the dependency that changed its error message, or stopped
+    // throwing at all, would not change this function's output on any input.
+    try {
+      return x25519.scalarMult(seed, element);
+    } catch (cause) {
+      if (isDegenerateX25519U(element)) return new Uint8Array(32);
+      throw cause;
+    }
   },
 };
 

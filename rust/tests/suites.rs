@@ -1,6 +1,6 @@
 //! The Rust half of the hybrid KEM suite conformance suite.
 //!
-//! Two vector files are run here, and they are not the same kind of thing.
+//! Three vector files are run here, and they are not the same kind of thing.
 //!
 //! `vectors/concrete-hybrid-kems-04-appendix-b.json` is transcribed from
 //! Appendix B of `draft-irtf-cfrg-concrete-hybrid-kems-04`. Nothing in it was
@@ -15,7 +15,16 @@
 //! TypeScript agree. They prove nothing about whether the suite is a good
 //! idea; `docs/mlkem1024-x25519.md` argues that question in both directions.
 //!
-//! The same two files are run by `ts/test/suites.test.js`.
+//! `vectors/x25519-degenerate-v1.json` is **adversarial**. Every group
+//! element in it is one no honest peer would send: a Curve25519 u-coordinate
+//! of small order, whose `X25519` output is the all-zero string. What those
+//! cases pin is that the output is absorbed rather than rejected, which is
+//! X-Wing's behaviour and therefore a claim about a CFRG specified suite for
+//! the `MLKEM768-X25519` half of them. They are in their own file because a
+//! reimplementer reading a conformance file should not have to sort the
+//! normative cases from the hostile ones.
+//!
+//! The same three files are run by `ts/test/suites.test.js`.
 
 use hybrid_kem_combiner::suites::{Provenance, Suite, SuiteError, SUITES};
 use serde_json::Value;
@@ -27,6 +36,10 @@ const APPENDIX_B: &str = concat!(
 const PINS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../vectors/mlkem1024-x25519-v1.json"
+);
+const DEGENERATE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../vectors/x25519-degenerate-v1.json"
 );
 
 fn load(path: &str) -> Value {
@@ -192,6 +205,118 @@ fn every_mlkem1024_x25519_regression_pin_matches() {
     for case in cases {
         assert_eq!(case["suite"], "MLKEM1024-X25519");
         run(case);
+    }
+}
+
+// --- Adversarial group elements -------------------------------------------
+
+/// A degenerate `ek_T` or `ct_T` must be absorbed, not refused, and must give
+/// the exact shared secret `vectors/x25519-degenerate-v1.json` records.
+///
+/// `X25519` returns 32 zero bytes when the input u-coordinate has small
+/// order, and neither X-Wing nor `docs/mlkem1024-x25519.md` section 3.7
+/// rejects that. `MLKEM768-X25519` **is** X-Wing, so half of these cases are
+/// a claim about a CFRG specified suite and not only about this project's
+/// own: an implementation that rejects here disagrees with every conforming
+/// X-Wing peer on exactly the inputs an adversary gets to choose.
+///
+/// The recorded values are cross-checked against the TypeScript package by
+/// `ts/test/suites.test.js`, which reads the same file. Nothing in the two
+/// implementations is shared, so agreement on these bytes is the check that
+/// would have caught the divergence this file was written for.
+#[test]
+fn every_degenerate_x25519_vector_matches() {
+    let doc = load(DEGENERATE);
+    assert_eq!(doc["kind"], "adversarial");
+    assert_eq!(
+        doc["anchor"], "none",
+        "these vectors must not claim an external anchor"
+    );
+    let cases = doc["cases"].as_array().expect("cases is an array");
+    assert_eq!(cases.len(), 10, "five u-coordinates for each of two suites");
+
+    for case in cases {
+        let suite = suite_by_name(case["suite"].as_str().unwrap());
+        let name = case["name"].as_str().unwrap();
+        let u = hex_field(case, "u");
+        assert_eq!(u.len(), 32, "{name}: u is a Curve25519 element");
+
+        let seed = hex_field(case, "seed");
+        let randomness = hex_field(case, "randomness");
+        let key_pair = suite
+            .derive_key_pair(&seed)
+            .unwrap_or_else(|e| panic!("{name}: derive_key_pair: {e}"));
+        assert_eq!(
+            hex::encode(key_pair.encapsulation_key()),
+            case["encapsulation_key"].as_str().unwrap(),
+            "{name}: the honest encapsulation key"
+        );
+
+        // Encapsulation against an attacker-chosen ek_T.
+        let mut hostile_ek = key_pair.encapsulation_key().to_vec();
+        let ek_split = suite.nek() - 32;
+        hostile_ek[ek_split..].copy_from_slice(&u);
+        let encapsulated = suite
+            .encapsulate_derand(&hostile_ek, &randomness)
+            .unwrap_or_else(|e| panic!("{name}: a degenerate ek_T was refused: {e}"));
+        assert_eq!(
+            hex::encode(encapsulated.shared_secret()),
+            case["encapsulation_shared_secret"].as_str().unwrap(),
+            "{name}: shared secret from encapsulation"
+        );
+
+        // Decapsulation of an attacker-chosen ct_T.
+        let honest = suite
+            .encapsulate_derand(key_pair.encapsulation_key(), &randomness)
+            .unwrap_or_else(|e| panic!("{name}: honest encapsulate_derand: {e}"));
+        let mut hostile_ct = honest.ciphertext().to_vec();
+        let ct_split = suite.nct() - 32;
+        hostile_ct[ct_split..].copy_from_slice(&u);
+        let decapsulated = suite
+            .decapsulate(key_pair.decapsulation_key(), &hostile_ct)
+            .unwrap_or_else(|e| panic!("{name}: a degenerate ct_T was refused: {e}"));
+        assert_eq!(
+            hex::encode(decapsulated.as_slice()),
+            case["decapsulation_shared_secret"].as_str().unwrap(),
+            "{name}: shared secret from decapsulation"
+        );
+    }
+}
+
+/// Both Curve25519 suites must be covered, or a silently empty filter would
+/// let `MLKEM768-X25519`, which is X-Wing, drift unnoticed.
+#[test]
+fn the_degenerate_vectors_cover_both_curve25519_suites() {
+    let doc = load(DEGENERATE);
+    for name in ["MLKEM768-X25519", "MLKEM1024-X25519"] {
+        let count = doc["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["suite"] == name)
+            .count();
+        assert_eq!(count, 5, "{name} has no degenerate vectors");
+    }
+}
+
+/// `Decaps` errors only on a wrong length ciphertext, which
+/// `docs/mlkem1024-x25519.md` section 3.6 states outright. A small-order
+/// `ct_T` is the input most likely to break that claim, so it is the one
+/// checked.
+#[test]
+fn decapsulation_of_a_small_order_ct_t_is_not_an_error() {
+    let doc = load(DEGENERATE);
+    for case in doc["cases"].as_array().unwrap() {
+        let suite = suite_by_name(case["suite"].as_str().unwrap());
+        let key_pair = suite.derive_key_pair(&hex_field(case, "seed")).unwrap();
+        let mut ct = vec![0u8; suite.nct()];
+        let ct_split = suite.nct() - 32;
+        ct[ct_split..].copy_from_slice(&hex_field(case, "u"));
+        assert!(
+            suite.decapsulate(key_pair.decapsulation_key(), &ct).is_ok(),
+            "{}: a small-order ct_T must decapsulate, not error",
+            case["name"].as_str().unwrap()
+        );
     }
 }
 
