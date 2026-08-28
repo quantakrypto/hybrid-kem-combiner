@@ -7,7 +7,7 @@ that reproduces every value implements the same combiner and the same suites.
 Nothing in this directory requires Rust or JavaScript to consume. Every value
 is hex.
 
-## The three files, and what each one is worth
+## The four files, and what each one is worth
 
 This is the most important distinction in the directory. A vector that came
 from a specification's authors proves conformance to something outside this
@@ -20,10 +20,22 @@ the same thing.
 | `hybrid-kem-combiner-v1.json` | The combiner. 15 positive, 4 negative cases | **Partly.** Three cases carry X-Wing draft 10 Appendix C shared secrets, one carries `qk-password-manager`'s independently pinned value; the rest are regression pins |
 | `concrete-hybrid-kems-04-appendix-b.json` | The three CFRG suites. 30 cases | **Entirely.** Every byte is transcribed from draft-irtf-cfrg-concrete-hybrid-kems-04 Appendix B. Nothing in the file was computed here |
 | `mlkem1024-x25519-v1.json` | `MLKEM1024-X25519`. 10 cases | **Not at all, and it cannot be.** This project specifies the suite, so no published vector exists. Regression pins only |
+| `x25519-degenerate-v1.json` | Small-order `ek_T` and `ct_T` for `MLKEM768-X25519` and `MLKEM1024-X25519`. 10 cases | **The values are not; the rule they encode is.** X-Wing does not reject the all-zero `X25519` output, and `MLKEM768-X25519` is X-Wing |
 
-`mlkem1024-x25519-v1.json` carries an `anchor` field whose value is the string
-`none`, and both test suites assert on it, so the file cannot quietly start
-claiming to be an anchor.
+`mlkem1024-x25519-v1.json` and `x25519-degenerate-v1.json` each carry an
+`anchor` field whose value is the string `none`, and both test suites assert
+on it, so neither file can quietly start claiming to be an anchor.
+
+`x25519-degenerate-v1.json` is the one file here whose inputs are hostile, and
+it carries a `kind` field of `adversarial` to say so. It is separate for a
+reason: a reimplementer reading a conformance file should not have to sort the
+normative cases from the ones no honest peer would send, and
+`concrete-hybrid-kems-04-appendix-b.json` in particular must stay a verbatim
+transcription of the CFRG's published appendix. What that file pins is that
+the all-zero `X25519` output is fed to the combiner as 32 zero bytes rather
+than rejected. An implementation that rejects it passes every case in the
+other three files and fails all ten of these, which is exactly what this
+project's TypeScript package did until 28 August 2026.
 
 ## Files
 
@@ -35,6 +47,8 @@ claiming to be an anchor.
 | `concrete-hybrid-kems-04-appendix-b.json` | The CFRG suite vectors. Transcribed, not generated. |
 | `extract_appendix_b.py` | The transcriber. It computes nothing. |
 | `mlkem1024-x25519-v1.json` | The `MLKEM1024-X25519` regression pins. |
+| `x25519-degenerate-v1.json` | The small-order Curve25519 element cases. Adversarial inputs, not conformance vectors. |
+| `generate_x25519_degenerate_vectors.rs` | Their generator, in `rust/examples/`. It also writes down why the five degenerate u-coordinates are the complete set. |
 
 Regenerate the combiner vectors with `python3 vectors/generate.py`. It depends
 on nothing outside the Python standard library.
@@ -47,6 +61,9 @@ Regenerate the `MLKEM1024-X25519` pins with
 `cd rust && cargo run --features suites --example generate_mlkem1024_x25519_vectors`.
 The TypeScript suite then has to reproduce them, which is what makes them a
 cross-language contract rather than one implementation talking to itself.
+
+Regenerate the degenerate element cases with
+`cd rust && cargo run --features suites --example generate_x25519_degenerate_vectors`.
 
 ## Why the generator is a third implementation
 
