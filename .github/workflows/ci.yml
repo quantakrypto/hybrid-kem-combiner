@@ -13,7 +13,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -35,19 +35,18 @@ jobs:
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest
-    # Two versions because `node --test` changed how it resolves a bare
-    # directory argument between them, which is how the test script broke
-    # while passing locally.
+    # The organization requires Node 24 or newer for all Actions jobs.
+    # Older package compatibility is not exercised by this CI matrix.
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [24]
     defaults:
       run:
         working-directory: ts
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm ci
@@ -57,8 +56,8 @@ jobs:
     name: Vectors are reproducible
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - uses: dtolnay/rust-toolchain@stable
